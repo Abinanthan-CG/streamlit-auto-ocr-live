@@ -1,0 +1,8 @@
+streamlit
+opencv-python-headless
+pytesseract
+gTTS
+streamlit-webrtc
+streamlit-autorefresh
+av
+numpy
