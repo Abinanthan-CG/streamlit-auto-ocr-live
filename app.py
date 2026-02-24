@@ -4,7 +4,6 @@ import pytesseract
 import numpy as np
 from gtts import gTTS
 import io
-import base64
 import time
 import threading
 import av
@@ -12,11 +11,18 @@ from streamlit_webrtc import webrtc_streamer, RTCConfiguration, WebRtcMode
 from streamlit_autorefresh import st_autorefresh
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="Live Auto OCR", page_icon="📸", layout="centered")
+st.set_page_config(page_title="Live Auto OCR", page_icon="🎧", layout="centered")
 
-# --- INITIALIZE STATE ---
+# --- INITIALIZE SESSION STATE ---
+# We need to store the audio/text so it persists between screen refreshes
 if "last_ocr_time" not in st.session_state:
     st.session_state.last_ocr_time = time.time()
+if "last_text" not in st.session_state:
+    st.session_state.last_text = ""
+if "last_audio" not in st.session_state:
+    st.session_state.last_audio = None
+if "snapshot_image" not in st.session_state:
+    st.session_state.snapshot_image = None
 
 # --- WEBRTC CONFIGURATION ---
 RTC_CONFIGURATION = RTCConfiguration(
@@ -30,33 +36,21 @@ class VideoProcessor:
         self.lock = threading.Lock()
 
     def recv(self, frame):
-        # Convert WebRTC frame to OpenCV image
         img = frame.to_ndarray(format="bgr24")
         with self.lock:
             self.frame = img
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
-# --- AUDIO AUTOPLAY FUNCTION ---
-def autoplay_audio(audio_bytes):
-    b64 = base64.b64encode(audio_bytes).decode()
-    md = f"""
-        <audio autoplay="true">
-        <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
-        </audio>
-        """
-    st.markdown(md, unsafe_allow_html=True)
-
 # --- UI HEADER ---
-st.title("📸 AI Mobile Scanner")
-st.markdown("Point your back camera at text. It reads every 30s, or when you click **Snap**.")
+st.title("🎧 AI Scanner (Manual Audio)")
+st.markdown("Point camera at text. It scans every 30s. **Click Play** to hear the result.")
 
-# --- CAMERA SETTINGS (Back Camera) ---
+# --- CAMERA SETUP (Back Camera) ---
 camera_constraints = {
-    "video": {"facingMode": "environment"}, # Forces back camera on mobile
+    "video": {"facingMode": "environment"}, 
     "audio": False
 }
 
-# --- STREAMER COMPONENT ---
 ctx = webrtc_streamer(
     key="ocr-streamer",
     mode=WebRtcMode.SENDRECV,
@@ -66,63 +60,74 @@ ctx = webrtc_streamer(
     async_processing=True,
 )
 
-# --- MAIN LOGIC LOOP ---
+# --- MAIN LOOP ---
 if ctx.state.playing:
-    # 1. Automatic Refresh (Keeps the UI alive and updating the timer)
+    # 1. Refresh UI every 1 second (1000ms) for the timer
     st_autorefresh(interval=1000, key="timer_refresh")
     
-    # 2. Calculate Timer
+    # 2. Timer Logic
     current_time = time.time()
     time_elapsed = current_time - st.session_state.last_ocr_time
     interval = 30
     time_left = max(0, int(interval - time_elapsed))
     
-    # 3. UI Controls
     col1, col2 = st.columns([2, 1])
     with col1:
-        st.info(f"⏳ Next Auto-Scan in: **{time_left}s**")
+        st.info(f"⏳ Next Scan in: **{time_left}s**")
     with col2:
-        # THE MANUAL BUTTON
         manual_trigger = st.button("📸 Snap Now", type="primary", use_container_width=True)
 
-    # 4. Trigger Logic: Run if Timer is up OR Manual Button is clicked
+    # 3. TRIGGER LOGIC (Timer OR Button)
     if time_elapsed >= interval or manual_trigger:
-        
-        # Check if camera is ready
         if ctx.video_processor and ctx.video_processor.frame is not None:
-            
-            # Grab frame thread-safely
+            # Capture Frame
             with ctx.video_processor.lock:
                 frame = ctx.video_processor.frame.copy()
             
-            # IMPORTANT: Reset the timer immediately!
+            # Reset Timer
             st.session_state.last_ocr_time = time.time()
 
+            # --- PROCESSING ---
             with st.spinner("👀 Processing..."):
-                # --- PREPROCESSING ---
+                # Preprocess
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                # OTSU Thresholding (Good for documents)
+                # OTSU Thresholding (Best for text)
                 _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-                # --- OCR ---
+                # OCR
                 text = pytesseract.image_to_string(thresh, config='--oem 3 --psm 6').strip()
                 
-                # Show result
-                st.image(frame, channels="BGR", caption="Snapshot Processed")
+                # Update Session State (This saves the result to memory!)
+                st.session_state.snapshot_image = frame
                 
                 if text:
-                    st.success(f"**Read:** {text}")
+                    st.session_state.last_text = text
                     
-                    # --- TTS AUDIO ---
+                    # Generate Audio
                     tts = gTTS(text=text, lang='en')
                     fp = io.BytesIO()
                     tts.write_to_fp(fp)
                     fp.seek(0)
-                    
-                    # Autoplay
-                    autoplay_audio(fp.read())
+                    st.session_state.last_audio = fp.read()
                 else:
-                    st.warning("No text detected.")
+                    st.session_state.last_text = "No text detected."
+                    st.session_state.last_audio = None
+
+    # 4. PERSISTENT DISPLAY SECTION
+    # This part runs every second, ensuring the player stays visible
+    st.markdown("---")
+    
+    if st.session_state.snapshot_image is not None:
+        st.image(st.session_state.snapshot_image, channels="BGR", caption="Last Snapshot", width=300)
+
+    if st.session_state.last_text:
+        if st.session_state.last_text == "No text detected.":
+            st.warning(st.session_state.last_text)
         else:
-            if manual_trigger:
-                st.error("Camera not ready yet. Wait a second!")
+            st.success("**Extracted Text:**")
+            st.write(st.session_state.last_text)
+
+            # --- THE MANUAL AUDIO PLAYER ---
+            if st.session_state.last_audio:
+                st.markdown("### 🔊 Audio Result")
+                st.audio(st.session_state.last_audio, format="audio/mp3")
