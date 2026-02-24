@@ -19,7 +19,6 @@ if "last_ocr_time" not in st.session_state:
     st.session_state.last_ocr_time = time.time()
 
 # --- WEBRTC CONFIGURATION ---
-# STUN servers allow the camera to work over the internet/mobile data
 RTC_CONFIGURATION = RTCConfiguration(
     {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
 )
@@ -31,22 +30,14 @@ class VideoProcessor:
         self.lock = threading.Lock()
 
     def recv(self, frame):
-        # Convert the WebRTC frame to an OpenCV image (numpy array)
+        # Convert WebRTC frame to OpenCV image
         img = frame.to_ndarray(format="bgr24")
-        
-        # Save the latest frame to memory safely
         with self.lock:
             self.frame = img
-            
-        # Return the frame so the user sees the video feed
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
 # --- AUDIO AUTOPLAY FUNCTION ---
 def autoplay_audio(audio_bytes):
-    """
-    Injects HTML to play audio automatically on mobile/desktop 
-    without requiring a click.
-    """
     b64 = base64.b64encode(audio_bytes).decode()
     md = f"""
         <audio autoplay="true">
@@ -55,79 +46,83 @@ def autoplay_audio(audio_bytes):
         """
     st.markdown(md, unsafe_allow_html=True)
 
-# --- UI ---
+# --- UI HEADER ---
 st.title("📸 AI Mobile Scanner")
-st.markdown("""
-**Instructions:**
-1. Click **START** below.
-2. If asked, allow camera access.
-3. Point your **back camera** at text.
-4. Every **30 seconds**, the AI will read it to you.
-""")
+st.markdown("Point your back camera at text. It reads every 30s, or when you click **Snap**.")
 
-# --- THE MAGIC SETTING FOR BACK CAMERA ---
-# "facingMode": "environment" tells the phone to use the rear camera.
+# --- CAMERA SETTINGS (Back Camera) ---
 camera_constraints = {
-    "video": {"facingMode": "environment"},
+    "video": {"facingMode": "environment"}, # Forces back camera on mobile
     "audio": False
 }
 
+# --- STREAMER COMPONENT ---
 ctx = webrtc_streamer(
     key="ocr-streamer",
     mode=WebRtcMode.SENDRECV,
     rtc_configuration=RTC_CONFIGURATION,
     video_processor_factory=VideoProcessor,
-    media_stream_constraints=camera_constraints, # <--- THIS ENABLES BACK CAMERA
+    media_stream_constraints=camera_constraints,
     async_processing=True,
 )
 
-# --- MAIN AUTOMATION LOOP ---
+# --- MAIN LOGIC LOOP ---
 if ctx.state.playing:
-    # Refresh the UI every 1 second to update the countdown timer
+    # 1. Automatic Refresh (Keeps the UI alive and updating the timer)
     st_autorefresh(interval=1000, key="timer_refresh")
     
+    # 2. Calculate Timer
     current_time = time.time()
     time_elapsed = current_time - st.session_state.last_ocr_time
-    interval = 30 # Time in seconds between scans
+    interval = 30
     time_left = max(0, int(interval - time_elapsed))
     
-    # Display Countdown
-    st.info(f"⏳ Next AI Scan in: **{time_left}s**")
-    
-    # TRIGGER OCR WHEN TIMER HITS 30s
-    if time_elapsed >= interval:
+    # 3. UI Controls
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        st.info(f"⏳ Next Auto-Scan in: **{time_left}s**")
+    with col2:
+        # THE MANUAL BUTTON
+        manual_trigger = st.button("📸 Snap Now", type="primary", use_container_width=True)
+
+    # 4. Trigger Logic: Run if Timer is up OR Manual Button is clicked
+    if time_elapsed >= interval or manual_trigger:
+        
+        # Check if camera is ready
         if ctx.video_processor and ctx.video_processor.frame is not None:
-            # Grab the latest frame thread-safely
+            
+            # Grab frame thread-safely
             with ctx.video_processor.lock:
                 frame = ctx.video_processor.frame.copy()
             
-            # Reset timer immediately so the loop continues
+            # IMPORTANT: Reset the timer immediately!
             st.session_state.last_ocr_time = time.time()
 
-            with st.spinner("👀 Reading text..."):
-                # 1. Preprocessing for Mobile Cameras (often clearer but shaky)
+            with st.spinner("👀 Processing..."):
+                # --- PREPROCESSING ---
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                
-                # Use OTSU thresholding (Better for documents with varying lighting)
+                # OTSU Thresholding (Good for documents)
                 _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-                # 2. Run OCR
-                # psm 6 = Assume a single uniform block of text
+                # --- OCR ---
                 text = pytesseract.image_to_string(thresh, config='--oem 3 --psm 6').strip()
                 
-                # Show the snapshot that was analyzed
+                # Show result
                 st.image(frame, channels="BGR", caption="Snapshot Processed")
                 
                 if text:
                     st.success(f"**Read:** {text}")
                     
-                    # 3. Generate Audio
+                    # --- TTS AUDIO ---
                     tts = gTTS(text=text, lang='en')
                     fp = io.BytesIO()
                     tts.write_to_fp(fp)
                     fp.seek(0)
                     
-                    # 4. Play Audio
+                    # Autoplay
                     autoplay_audio(fp.read())
                 else:
-                    st.warning("No text detected. Try holding the camera steady.")
+                    st.warning("No text detected.")
+        else:
+            if manual_trigger:
+                st.error("Camera not ready yet. Wait a second!")
