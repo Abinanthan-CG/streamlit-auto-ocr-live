@@ -55,7 +55,7 @@ if "snapshot_image" not in st.session_state:
 def load_model():
     prototxt = "deploy.prototxt"
     model = "mobilenet_iter_73000.caffemodel"
-    net = cv2.dnn.readNetFromCaret(prototxt, model)
+    net = cv2.dnn.readNetFromCaffe(prototxt, model)
     return net
 
 NET = load_model()
