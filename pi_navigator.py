@@ -5,8 +5,13 @@ import threading
 import pyttsx3
 import argparse
 import os
-from picamera2 import Picamera2
-from ultralytics import YOLO
+
+# --- HARDWARE ABSTRACTION LAYER ---
+try:
+    from picamera2 import Picamera2
+    HAS_PICAMERA = True
+except ImportError:
+    HAS_PICAMERA = False
 
 # --- CONFIGURATION ---
 PRIORITIES = {
@@ -18,34 +23,52 @@ PRIORITIES = {
 }
 
 class NavigatorPi:
-    def __init__(self, frequency=1.0, display=False):
+    def __init__(self, frequency=1.0, display=False, pc_test=False):
         self.frequency = frequency
         self.display = display
+        self.pc_test = pc_test or (not HAS_PICAMERA)
         
         # Initialize TTS Engine
-        self.engine = pyttsx3.init()
-        self.engine.setProperty('rate', 160)
+        try:
+            self.engine = pyttsx3.init()
+            self.engine.setProperty('rate', 160)
+            self.has_tts = True
+        except Exception as e:
+            print(f"[WARN] TTS failed to initialize: {e}. Falling back to terminal output.")
+            self.has_tts = False
         
-        # Load Model (Prioritize OpenVINO for RPi 5)
+        # Load Model (Prioritize OpenVINO for RPi 5, otherwise standard YOLOv8n)
+        from ultralytics import YOLO
         ov_model = "yolov8n_openvino_model"
-        if os.path.exists(ov_model):
+        if os.path.exists(ov_model) and not self.pc_test:
             print(f"[INFO] Using ACCELERATED OpenVINO engine: {ov_model}")
             self.model = YOLO(ov_model, task="detect")
         else:
-            print("[INFO] OpenVINO model not found. Falling back to standard YOLOv8-nano engine...")
+            engine_name = "STANDARD YOLOv8-nano" if not self.pc_test else "PC EMULATION"
+            print(f"[INFO] Using {engine_name} engine (yolov8n.pt)...")
             self.model = YOLO("yolov8n.pt")
         
         # Initialize Camera
-        print("[INFO] Initializing Picamera2...")
-        self.picam2 = Picamera2()
-        self.picam2.configure(self.picam2.create_video_configuration(main={"size": (640, 480)}))
-        self.picam2.start()
+        if self.pc_test:
+            print("[INFO] Initializing PC Webcam (cv2.VideoCapture)...")
+            self.cap = cv2.VideoCapture(0)
+            if not self.cap.isOpened():
+                raise ConnectionError("Could not open PC Webcam. Please check connection.")
+        else:
+            print("[INFO] Initializing Picamera2...")
+            self.picam2 = Picamera2()
+            self.picam2.configure(self.picam2.create_video_configuration(main={"size": (640, 480)}))
+            self.picam2.start()
         
         self.last_speech_time = 0
         self.lock = threading.Lock()
         self.running = True
 
     def speak(self, text):
+        if not self.has_tts:
+            print(f"[VOICE SIM] {text}")
+            return
+            
         def _say():
             with self.lock:
                 self.engine.say(text)
@@ -53,14 +76,21 @@ class NavigatorPi:
         threading.Thread(target=_say).start()
 
     def run(self):
-        print(f"[INFO] Starting Navigator Loop (Scan Interval: {self.frequency}s)...")
+        mode_str = "PC EMULATION" if self.pc_test else "HARDWARE"
+        print(f"[INFO] Starting Navigator Loop | Mode: {mode_str} | Interval: {self.frequency}s")
         try:
             while self.running:
-                frame = self.picam2.capture_array()
-                h, w = frame.shape[:2]
+                # Capture frame
+                if self.pc_test:
+                    ret, frame = self.cap.read()
+                    if not ret: break
+                else:
+                    frame = self.picam2.capture_array()
                 
+                h, w = frame.shape[:2]
                 current_time = time.time()
-                # Run inference as fast as possible for smooth display, but respect speech frequency
+                
+                # YOLO Inference
                 results = self.model(frame, verbose=False, conf=0.45)
                 objs = []
                 
@@ -75,7 +105,7 @@ class NavigatorPi:
                         priority = PRIORITIES.get(label, 3)
                         objs.append({"label": label, "zone": zone, "area": area, "prio": priority, "coords": (int(x1), int(y1), int(x2), int(y2))})
 
-                # Speech Logic (Every N seconds)
+                # Speech Logic
                 if current_time - self.last_speech_time >= self.frequency:
                     msg, speech = "PATH CLEAR", "The path ahead is clear."
                     objs_sorted = sorted(objs, key=lambda x: (x['prio'], -x['area']))
@@ -106,21 +136,26 @@ class NavigatorPi:
                         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
                         cv2.putText(frame, o['label'], (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
                     
-                    cv2.imshow("SEEING WITH SOUND - Accelerated RPi 5", frame)
+                    title = f"SEEING WITH SOUND - {mode_str}"
+                    cv2.imshow(title, frame)
                     if cv2.waitKey(1) & 0xFF == ord('q'):
                         break
         except Exception as e:
             print(f"[ERROR] {e}")
         finally:
-            self.picam2.stop()
-            self.picam2.close()
+            if self.pc_test:
+                self.cap.release()
+            else:
+                self.picam2.stop()
+                self.picam2.close()
             cv2.destroyAllWindows()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="SEEING WITH SOUND - Accelerated Pi 5")
+    parser = argparse.ArgumentParser(description="SEEING WITH SOUND - RPi 5 Navigator")
     parser.add_argument("--freq", type=float, default=1.0, help="Scan frequency in seconds")
     parser.add_argument("--display", action="store_true", help="Show video window")
+    parser.add_argument("--pc-test", action="store_true", help="Force PC Emulation mode (uses Webcam)")
     args = parser.parse_args()
 
-    nav = NavigatorPi(frequency=args.freq, display=args.display)
+    nav = NavigatorPi(frequency=args.freq, display=args.display, pc_test=args.pc_test)
     nav.run()
