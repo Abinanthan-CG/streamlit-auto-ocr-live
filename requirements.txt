@@ -6,3 +6,5 @@ streamlit-webrtc
 streamlit-autorefresh
 av
 numpy
+pypdf
+huggingface_hub
