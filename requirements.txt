@@ -7,3 +7,4 @@ numpy
 pypdf
 huggingface_hub
 ultralytics
+pyttsx3
