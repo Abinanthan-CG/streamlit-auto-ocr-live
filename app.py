@@ -9,7 +9,7 @@ import av
 from streamlit_webrtc import webrtc_streamer, RTCConfiguration, WebRtcMode
 from streamlit_autorefresh import st_autorefresh
 
-# --- MINIMALIST MOBILE UI CONFIG ---
+# --- SMART MINIMALIST UI CONFIG ---
 st.set_page_config(page_title="NAVIGATOR", page_icon="🧭", layout="centered")
 
 st.markdown("""
@@ -18,6 +18,14 @@ st.markdown("""
     
     .main { background-color: #000000; color: #ffffff; font-family: 'Inter', sans-serif; }
     .stApp { max-width: 100%; padding: 0; }
+    
+    /* Foldable Panel Styling */
+    .stExpander {
+        background: rgba(30, 30, 30, 0.5);
+        border: 1px solid #333;
+        border-radius: 10px;
+        margin: 10px;
+    }
     
     /* Full-width camera and alerts */
     .element-container img { border-radius: 0px; width: 100% !important; }
@@ -34,6 +42,7 @@ st.markdown("""
         text-align: center;
         border-top: 2px solid #333;
         z-index: 1000;
+        margin-bottom: 0;
     }
     
     .status-text {
@@ -45,25 +54,6 @@ st.markdown("""
     .status-clear { color: #00ff88; }
     .status-warn { color: #ffcc00; }
     .status-stop { color: #ff3333; text-transform: uppercase; }
-
-    /* Radar Pulse Overlay */
-    .radar-pulse {
-        position: absolute;
-        top: 20%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        width: 100px;
-        height: 100px;
-        border: 2px solid #00f2ff;
-        border-radius: 50%;
-        animation: pulse 2s infinite;
-        pointer-events: none;
-    }
-    
-    @keyframes pulse {
-        0% { transform: translate(-50%, -50%) scale(0.5); opacity: 1; }
-        100% { transform: translate(-50%, -50%) scale(2); opacity: 0; }
-    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -92,6 +82,16 @@ class Processor:
         with self.lock: self.frame = img
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
+# --- SMART MINIMALIST TOP PANEL ---
+with st.expander("⚙️ Settings & Info"):
+    scan_interval = st.slider("Scan Frequency (seconds)", 3, 30, 5)
+    st.markdown("""
+    **SEEING WITH SOUND: Navigator**
+    1. **Senses:** Automatically scans the environment for obstacles.
+    2. **Maps:** Detects objects in Left, Center, and Right zones.
+    3. **Guides:** Provides voice commands to help you navigate safely.
+    """)
+
 ctx = webrtc_streamer(
     key="nav",
     mode=WebRtcMode.SENDRECV,
@@ -101,7 +101,7 @@ ctx = webrtc_streamer(
     async_processing=True,
 )
 
-# --- MINIMAL UI ---
+# --- UI DISPLAY ---
 if st.session_state.snapshot is not None:
     st.image(st.session_state.snapshot, channels="BGR", use_container_width=True)
 else:
@@ -119,10 +119,11 @@ st.markdown(f"""
 # Automatic Audio Trigger
 if st.session_state.audio:
     st.audio(st.session_state.audio, format="audio/mp3", autoplay=True)
+    st.session_state.audio = None # Clear after playback to prevent loops
 
 # --- LOGIC ---
 if ctx.state.playing:
-    st_autorefresh(interval=3000, key="nav_loop") # Scan every 3s for mobile
+    st_autorefresh(interval=scan_interval * 1000, key="nav_loop")
     if ctx.video_processor and ctx.video_processor.frame is not None:
         with ctx.video_processor.lock: frame = ctx.video_processor.frame.copy()
         
@@ -150,14 +151,11 @@ if ctx.state.playing:
             msg, mtype, speech = "STOP! DANGER", "stop", "Stop immediately. Object in front."
         elif center:
             left_clear = len([o for o in objs if o['zone'] == 'left']) == 0
-            msg = "MOVE LEFT" if left_clear else "MOVE RIGHT"
-            mtype = "stop"
-            speech = f"Obstacle ahead. {msg.lower()}."
+            command = "MOVE LEFT" if left_clear else "MOVE RIGHT"
+            msg, mtype, speech = command, "stop", f"Obstacle ahead. {command.lower()}."
         elif objs:
             names = list(set([o['label'] for o in objs]))
-            msg = f"CLEAR - {names[0].upper()}"
-            mtype = "warn"
-            speech = f"I see a {names[0]}. Path looks okay."
+            msg, mtype, speech = f"CLEAR - {names[0].upper()}", "warn", f"I see a {names[0]}. Path looks okay."
         
         st.session_state.msg = msg
         st.session_state.msg_type = mtype
