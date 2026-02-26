@@ -7,7 +7,10 @@ sudo apt-get update
 sudo apt-get install -y libcamera-apps espeak-ng python3-opencv
 
 # Install Python requirements
-pip3 install pyttsx3 numpy picamera2 ultralytics
+pip3 install pyttsx3 numpy picamera2 ultralytics openvino
+
+echo "--- Optimizing Model (OpenVINO) ---"
+yolo export model=yolov8n.pt format=openvino
 
 echo "--- Setup Complete ---"
 echo "To run the navigator: python3 pi_navigator.py"

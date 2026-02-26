@@ -4,6 +4,7 @@ import time
 import threading
 import pyttsx3
 import argparse
+import os
 from picamera2 import Picamera2
 from ultralytics import YOLO
 
@@ -17,7 +18,7 @@ PRIORITIES = {
 }
 
 class NavigatorPi:
-    def __init__(self, frequency=3.0, display=False):
+    def __init__(self, frequency=1.0, display=False):
         self.frequency = frequency
         self.display = display
         
@@ -25,9 +26,14 @@ class NavigatorPi:
         self.engine = pyttsx3.init()
         self.engine.setProperty('rate', 160)
         
-        # Load Model (YOLOv8 Nano)
-        print("[INFO] Loading YOLOv8-nano engine...")
-        self.model = YOLO("yolov8n.pt")
+        # Load Model (Prioritize OpenVINO for RPi 5)
+        ov_model = "yolov8n_openvino_model"
+        if os.path.exists(ov_model):
+            print(f"[INFO] Using ACCELERATED OpenVINO engine: {ov_model}")
+            self.model = YOLO(ov_model, task="detect")
+        else:
+            print("[INFO] OpenVINO model not found. Falling back to standard YOLOv8-nano engine...")
+            self.model = YOLO("yolov8n.pt")
         
         # Initialize Camera
         print("[INFO] Initializing Picamera2...")
@@ -47,31 +53,30 @@ class NavigatorPi:
         threading.Thread(target=_say).start()
 
     def run(self):
-        print("[INFO] Starting Advanced Scene Understanding Loop...")
+        print(f"[INFO] Starting Navigator Loop (Scan Interval: {self.frequency}s)...")
         try:
             while self.running:
                 frame = self.picam2.capture_array()
                 h, w = frame.shape[:2]
                 
                 current_time = time.time()
+                # Run inference as fast as possible for smooth display, but respect speech frequency
+                results = self.model(frame, verbose=False, conf=0.45)
+                objs = []
+                
+                for r in results:
+                    for box in r.boxes:
+                        x1, y1, x2, y2 = box.xyxy[0].tolist()
+                        cls = int(box.cls[0])
+                        label = self.model.names[cls]
+                        area = ((x2 - x1) * (y2 - y1)) / (w * h)
+                        cx = (x1 + x2) / 2
+                        zone = "center" if w/3 < cx < 2*w/3 else ("left" if cx < w/3 else "right")
+                        priority = PRIORITIES.get(label, 3)
+                        objs.append({"label": label, "zone": zone, "area": area, "prio": priority, "coords": (int(x1), int(y1), int(x2), int(y2))})
+
+                # Speech Logic (Every N seconds)
                 if current_time - self.last_speech_time >= self.frequency:
-                    # YOLO Inference
-                    results = self.model(frame, verbose=False, conf=0.45)
-                    objs = []
-                    
-                    for r in results:
-                        for box in r.boxes:
-                            x1, y1, x2, y2 = box.xyxy[0].tolist()
-                            cls = int(box.cls[0])
-                            label = self.model.names[cls]
-                            area = ((x2 - x1) * (y2 - y1)) / (w * h)
-                            cx = (x1 + x2) / 2
-                            zone = "center" if w/3 < cx < 2*w/3 else ("left" if cx < w/3 else "right")
-                            priority = PRIORITIES.get(label, 3)
-                            
-                            objs.append({"label": label, "zone": zone, "area": area, "prio": priority, "coords": (int(x1), int(y1), int(x2), int(y2))})
-                    
-                    # Logic: Scene Interpreter
                     msg, speech = "PATH CLEAR", "The path ahead is clear."
                     objs_sorted = sorted(objs, key=lambda x: (x['prio'], -x['area']))
                     
@@ -93,14 +98,15 @@ class NavigatorPi:
                     self.speak(speech)
                     self.last_speech_time = current_time
 
-                    if self.display:
-                        for o in objs:
-                            x1, y1, x2, y2 = o['coords']
-                            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                            cv2.putText(frame, o['label'], (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                
+                # Display Logic
                 if self.display:
-                    cv2.imshow("SEEING WITH SOUND - RPi 5 Edition", frame)
+                    for o in objs:
+                        x1, y1, x2, y2 = o['coords']
+                        color = (0, 255, 0) if o['area'] < 0.4 else (0, 0, 255)
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                        cv2.putText(frame, o['label'], (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                    
+                    cv2.imshow("SEEING WITH SOUND - Accelerated RPi 5", frame)
                     if cv2.waitKey(1) & 0xFF == ord('q'):
                         break
         except Exception as e:
@@ -111,8 +117,8 @@ class NavigatorPi:
             cv2.destroyAllWindows()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="SEEING WITH SOUND - Pi 5 Edition")
-    parser.add_argument("--freq", type=float, default=3.0, help="Scan frequency in seconds")
+    parser = argparse.ArgumentParser(description="SEEING WITH SOUND - Accelerated Pi 5")
+    parser.add_argument("--freq", type=float, default=1.0, help="Scan frequency in seconds")
     parser.add_argument("--display", action="store_true", help="Show video window")
     args = parser.parse_args()
 
