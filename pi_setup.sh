@@ -7,7 +7,7 @@ sudo apt-get update
 sudo apt-get install -y libcamera-apps espeak-ng python3-opencv
 
 # Install Python requirements
-pip3 install pyttsx3 numpy picamera2
+pip3 install pyttsx3 numpy picamera2 ultralytics
 
 echo "--- Setup Complete ---"
 echo "To run the navigator: python3 pi_navigator.py"

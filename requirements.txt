@@ -6,3 +6,4 @@ av
 numpy
 pypdf
 huggingface_hub
+ultralytics
