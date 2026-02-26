@@ -1,14 +1,21 @@
 # 🧭 SEEING WITH SOUND: Autonomous Navigator
 
 ```text
-   _____ ______ ______ _____ _   _  _____  __          _______ _______ _    _
-  / ____|  ____|  ____|_   _| \ | |/ ____| \ \        / /_   _|__   __| |  | |
- | (___ | |__  | |__    | | |  \| | |  __   \ \  /\  / /  | |    | |  | |__| |
-  \___ \|  __| |  __|   | | | . ` | | |_ |   \ \/  \/ /   | |    | |  |  __  |
-  ____) | |____| |____ _| |_| |\  | |__| |    \  /\  /   _| |_   | |  | |  | |
- |_____/|______|______|_____|_| \_|\_____|     \/  \/   |_____|  |_|  |_|  |_|
+  _____ ______ ______ _____ _   _  _____  __          _______ _______ _    _
+ / ____|  ____|  ____|_   _| \ | |/ ____| \ \        / /_   _|__   __| |  | |
+| (___ | |__  | |__    | | |  \| | |  __   \ \  /\  / /  | |    | |  | |__| |
+ \___ \|  __| |  __|   | | | . ` | | |_ |   \ \/  \/ /   | |    | |  |  __  |
+ ____) | |____| |____ _| |_| |\  | |__| |    \  /\  /   _| |_   | |  | |  | |
+|_____/|______|______|_____|_| \_|\_____|     \/  \/   |_____|  |_|  |_|  |_|
 
-                   --- VISUAL-TO-AUDITORY AID SYSTEM ---
+  _____  ____  _    _ _   _ _____
+ / ____|/ __ \| |  | | \ | |  __ \
+| (___ | |  | | |  | |  \| | |  | |
+ \___ \| |  | | |  | | . ` | |  | |
+ ____) | |__| | |__| | |\  | |__| |
+|_____/ \____/ \____/|_| \_|_____/
+
+             --- VISUAL-TO-AUDITORY AID SYSTEM ---
 ```
 
 **SEEING WITH SOUND** is a state-of-the-art navigation assistant designed to empower visually impaired individuals. By converting real-time environmental data into intuitive spatial audio cues, the system helps users avoid obstacles and navigate their surroundings with confidence.
@@ -65,15 +72,24 @@ A standalone, offline version designed for independent hardware setups (e.g., sm
 
 ### For Raspberry Pi 5 (Hardware Version)
 
-1. **Prepare your Pi:** Ensure the RPi camera module is connected.
-2. **Run the setup script:**
+The Raspberry Pi 5 version requires specific hardware libraries (`picamera2` and `libcamera`).
+
+1. **Enable the Camera:**
+   Run `sudo raspi-config`, go to **Interface Options**, and ensure **Legacy Camera** is disabled (RPi 5 uses the new libcamera stack).
+2. **Automated Setup:**
+   Run the following commands to install system dependencies and Python packages:
    ```bash
    chmod +x pi_setup.sh
    ./pi_setup.sh
    ```
-3. **Run the navigator:**
+   _Note: If you are using a Virtual Environment (recommended), ensure it is active before running the script._
+3. **Run the Navigator:**
    ```bash
    python3 pi_navigator.py
+   ```
+   _For a visual preview (requires a monitor or VNC):_
+   ```bash
+   python3 pi_navigator.py --display
    ```
 
 ---
