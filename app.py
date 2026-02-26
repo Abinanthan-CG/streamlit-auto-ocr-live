@@ -141,13 +141,23 @@ if ctx.state.playing:
         
         objs = []
         for i in range(detections.shape[2]):
-            if detections[0, 0, i, 2] > 0.5:
+            confidence = detections[0, 0, i, 2]
+            if confidence > 0.5:
                 box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
                 (sx, sy, ex, ey) = box.astype("int")
                 area = ((ex-sx)*(ey-sy)) / (w*h)
                 cx = (sx+ex)/2
                 zone = "center" if w/3 < cx < 2*w/3 else ("left" if cx < w/3 else "right")
-                objs.append({"label": CLASSES[int(detections[0, 0, i, 1])], "zone": zone, "area": area})
+                label = CLASSES[int(detections[0, 0, i, 1])]
+                objs.append({"label": label, "zone": zone, "area": area})
+                
+                # Draw visual feedback on the frame
+                color = (0, 255, 0) # Green for clear
+                if area > 0.35: color = (0, 0, 255) # Red for danger
+                
+                cv2.rectangle(frame, (sx, sy), (ex, ey), color, 2)
+                cv2.putText(frame, f"{label.upper()} {int(confidence*100)}%", (sx, sy - 10), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
         
         # Determine Command
         msg, mtype, speech = "PATH CLEAR", "clear", "Path is clear."
