@@ -1,13 +1,12 @@
 import streamlit as st
 import cv2
 import numpy as np
-from gtts import gTTS
-import io
 import time
 import threading
 import av
 from streamlit_webrtc import webrtc_streamer, RTCConfiguration, WebRtcMode
 from streamlit_autorefresh import st_autorefresh
+import streamlit.components.v1 as components
 
 # --- SMART MINIMALIST UI CONFIG ---
 st.set_page_config(page_title="NAVIGATOR", page_icon="🧭", layout="centered")
@@ -19,7 +18,6 @@ st.markdown("""
     .main { background-color: #000000; color: #ffffff; font-family: 'Inter', sans-serif; }
     .stApp { max-width: 100%; padding: 0; }
     
-    /* Foldable Panel Styling */
     .stExpander {
         background: rgba(30, 30, 30, 0.5);
         border: 1px solid #333;
@@ -27,10 +25,8 @@ st.markdown("""
         margin: 10px;
     }
     
-    /* Full-width camera and alerts */
     .element-container img { border-radius: 0px; width: 100% !important; }
     
-    /* Navigation Bar */
     .nav-bar {
         position: fixed;
         bottom: 0;
@@ -57,12 +53,23 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+# --- WEB SPEECH API HELPER ---
+def speak(text):
+    if text:
+        components.html(f"""
+            <script>
+            var msg = new SpeechSynthesisUtterance('{text}');
+            window.speechSynthesis.cancel(); // Stop any current speech
+            window.speechSynthesis.speak(msg);
+            </script>
+        """, height=0)
+
 # --- SESSION STATE ---
 if "last_scan" not in st.session_state: st.session_state.last_scan = time.time()
 if "msg" not in st.session_state: st.session_state.msg = "SYSTEM INITIALIZING"
 if "msg_type" not in st.session_state: st.session_state.msg_type = "clear"
 if "snapshot" not in st.session_state: st.session_state.snapshot = None
-if "audio" not in st.session_state: st.session_state.audio = None
+if "speech_queue" not in st.session_state: st.session_state.speech_queue = None
 
 # --- MODEL ---
 @st.cache_resource
@@ -89,7 +96,7 @@ with st.expander("⚙️ Settings & Info"):
     **SEEING WITH SOUND: Navigator**
     1. **Senses:** Automatically scans the environment for obstacles.
     2. **Maps:** Detects objects in Left, Center, and Right zones.
-    3. **Guides:** Provides voice commands to help you navigate safely.
+    3. **Guides:** Provides instant voice commands to help you navigate safely.
     """)
 
 ctx = webrtc_streamer(
@@ -116,10 +123,10 @@ st.markdown(f"""
     </div>
 """, unsafe_allow_html=True)
 
-# Automatic Audio Trigger
-if st.session_state.audio:
-    st.audio(st.session_state.audio, format="audio/mp3", autoplay=True)
-    st.session_state.audio = None # Clear after playback to prevent loops
+# Instant Speech Trigger
+if st.session_state.speech_queue:
+    speak(st.session_state.speech_queue)
+    st.session_state.speech_queue = None # Clear after triggering
 
 # --- LOGIC ---
 if ctx.state.playing:
@@ -160,11 +167,6 @@ if ctx.state.playing:
         st.session_state.msg = msg
         st.session_state.msg_type = mtype
         st.session_state.snapshot = frame
+        st.session_state.speech_queue = speech # Queue for immediate browser speech
         
-        # Audio
-        tts = gTTS(text=speech, lang='en')
-        fp = io.BytesIO()
-        tts.write_to_fp(fp)
-        fp.seek(0)
-        st.session_state.audio = fp.read()
         st.rerun()
