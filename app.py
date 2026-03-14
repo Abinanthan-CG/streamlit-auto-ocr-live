@@ -4,6 +4,7 @@ import numpy as np
 import time
 import streamlit.components.v1 as components
 from streamlit_webrtc import webrtc_streamer, RTCConfiguration, WebRtcMode
+from streamlit_autorefresh import st_autorefresh
 from ultralytics import YOLO
 import torch
 import av
@@ -380,9 +381,17 @@ def get_dir_icon(direction):
 
 # --- WEBRTC PROCESSOR ---
 class VideoProcessor:
+    def __init__(self):
+        self.latest_announce = ""
+        self.latest_dist = "FAR"
+        self.empty_count = 0
+        self.total_frames = 0
+        self.total_dets = 0
+
     def recv(self, frame):
         frame_bgr = frame.to_ndarray(format="bgr24")
         orig_h, orig_w = frame_bgr.shape[:2]
+        self.total_frames += 1
         
         # Inference with Letterbox (YOLOv8s)
         lb_img, scale, pad_x, pad_y = letterbox(frame_bgr)
@@ -430,24 +439,43 @@ class VideoProcessor:
                 "bbox": (int(ux1), int(uy1), int(ux2), int(uy2)),
                 "rank": (is_prio, dist_rank)
             })
-            
-        # Draw on frame and prepare global messages
+        
+        self.total_dets += len(detections)
         annotated_frame = frame_bgr.copy()
         
         if len(detections) > 0:
-            # Sort: Priority first, then closest
+            self.empty_count = 0
             detections.sort(key=lambda x: x["rank"])
-            
             primary = detections[0]
             plabel, pdist, pdir = primary["label"], primary["dist"], primary["dir"]
             
-            # Draw primary bbox thick
+            # Draw
             px1, py1, px2, py2 = primary["bbox"]
             cv2.rectangle(annotated_frame, (px1, py1), (px2, py2), (0, 0, 255), 4)
-            # Label
-            icon = get_dir_icon(pdir)
             cv2.putText(annotated_frame, f"{plabel.upper()} {pdist}", (px1, py1 - 10), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3)
+            
+            # Formula for announcement state
+            if pdist == "VERY_CLOSE" and pdir == "CENTER":
+                self.latest_announce = f"{lang_cfg['warning']}! {plabel} {lang_cfg['ahead']}, {lang_cfg['very_close']}"
+            elif pdist == "FAR" and pdir == "CENTER":
+                self.latest_announce = f"{plabel} {lang_cfg['ahead']}"
+            else:
+                dir_str = lang_cfg["left"] if pdir == "LEFT" else (lang_cfg["right"] if pdir == "RIGHT" else lang_cfg["ahead"])
+                dist_str = lang_cfg["very_close"] if pdist == "VERY_CLOSE" else (lang_cfg["close"] if pdist == "CLOSE" else (lang_cfg["nearby"] if pdist == "MEDIUM" else ""))
+                self.latest_announce = f"{plabel} {dir_str}, {dist_str}".strip(", ")
+            self.latest_dist = pdist
+            
+        elif midas_dist in ["VERY_CLOSE", "CLOSE"] and midas_dist not in yolo_active_dists:
+            self.empty_count = 0
+            dist_str = lang_cfg["very_close"] if midas_dist == "VERY_CLOSE" else lang_cfg["close"]
+            self.latest_announce = f"{lang_cfg['warning']}! {lang_cfg['obstacle']}, {dist_str}"
+            self.latest_dist = midas_dist
+        else:
+            self.empty_count += 1
+            if self.empty_count >= 10: # Debounced clear
+                self.latest_announce = lang_cfg["clear"]
+                self.latest_dist = "FAR"
             
         return av.VideoFrame.from_ndarray(annotated_frame, format="bgr24")
 
@@ -462,10 +490,26 @@ webrtc_ctx = webrtc_streamer(
     rtc_configuration=RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}),
     video_processor_factory=VideoProcessor,
     media_stream_constraints={"video": {"facingMode": "environment"}, "audio": False},
-    # Important: False means the recv runs synchronously in the main thread space 
-    # so we can draw annotations inline safely.
     async_processing=False,
 )
+
+# Polling loop to bridge recv thread and main thread voice triggers
+if webrtc_ctx.state.playing:
+    st_autorefresh(interval=1000, key="voice_trigger_loop")
+    
+    if webrtc_ctx.video_processor:
+        proc = webrtc_ctx.video_processor
+        if proc.latest_announce:
+            # Sync session state stats
+            st.session_state.frame_count = proc.total_frames
+            st.session_state.det_count = proc.total_dets
+            
+            # TRIGGER VOICE (Debounced inside function)
+            trigger_voice_and_haptic(proc.latest_announce, proc.latest_dist)
+            
+            # Update UI Msg
+            st.session_state.ui_msg = proc.latest_announce.upper()
+            st.session_state.ui_msg_class = get_dist_class(proc.latest_dist)
 
 stats_placeholder.markdown(f"**Frames Processed:** {st.session_state.frame_count}\n\n**Objects Detected:** {st.session_state.det_count}")
 
