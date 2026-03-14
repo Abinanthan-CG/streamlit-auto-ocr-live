@@ -1,165 +1,97 @@
-# 🧭 SEEING WITH SOUND: Autonomous Navigator
+# 🧭 VisionAid: AI-Powered Autonomous Navigator
+
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_svg.svg)](https://visionaid.streamlit.app/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+**VisionAid** is a state-of-the-art navigation assistant designed to empower visually impaired individuals by converting real-time environmental data into intuitive spatial audio cues and haptic feedback. Built with a focus on **low-latency performance** and **accessibility**, VisionAid transforms any modern smartphone or laptop into a wearable autonomous navigator.
+
+---
+
+## ✨ Key Features
+
+### 🚀 Real-Time Intelligence
+- **YOLOv8n Object Detection**: High-speed detection of people, vehicles, stairs, and household obstacles.
+- **Lightweight Obstacle Detection**: A unique proprietary contour-based detector (<5ms) that identifies unknown obstacles even when the primary AI is idle.
+- **Spatial Auditory Cues**: Categorizes detects into **Left, Center,** and **Right** zones with relative distance estimation.
+
+### 🔊 Multi-Language Accessibility
+- **Trilingual Voice Support**: Full voice feedback in **English**, **Tamil (தமிழ்)**, and **Hindi (हिन्दी)**.
+- **Dynamic Proximity Haptics**: Integrated Web Vibration API providing tactile distance alerts (requires a one-tap user interaction to enable).
+- **High-Contrast UI**: A sleek, accessibility-first "Caregiver View" designed for high visibility and monitoring.
+
+### ⚡ Performance Optimized
+- **Minimal Latency Engine**: Optimized for CPU-only environments (like Streamlit Cloud) using frame-skipping logic and reduced inference resolution.
+- **Memory Efficient**: Removed heavy dependencies (Torch/Timm) in favor of a lean, high-performance runtime.
+
+---
+
+## 🛠️ Technology Stack
+
+- **Core Engine**: Python 3.10+
+- **Vision**: OpenCV, Ultralytics YOLOv8n
+- **UI Framework**: Streamlit
+- **Communication**: Web Speech API (Voice), Web Vibration API (Haptics)
+- **Streaming**: Streamlit-WebRTC
+
+---
+
+## 🚀 Getting Started
+
+### 🌐 Cloud Access
+The fastest way to experience VisionAid is via our livedeploy:
+👉 **[Launch VisionAid on Streamlit Cloud](https://visionaid.streamlit.app/)**
+
+### 💻 Local Installation
+
+1.  **Clone the Repository**
+    ```bash
+    git clone https://github.com/Abinanthan-CG/visual-AID.git
+    cd visual-AID
+    ```
+
+2.  **Install Dependencies**
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+3.  **Run the Application**
+    ```bash
+    streamlit run app.py
+    ```
+
+---
+
+## 🔧 Deployment Configuration
+
+If deploying to **Streamlit Cloud** or a **Debian-based server**, ensure `packages.txt` is present to resolve headless OpenCV dependencies:
 
 ```text
-  _____ ______ ______ _____ _   _  _____  __          _______ _______ _    _
- / ____|  ____|  ____|_   _| \ | |/ ____| \ \        / /_   _|__   __| |  | |
-| (___ | |__  | |__    | | |  \| | |  __   \ \  /\  / /  | |    | |  | |__| |
- \___ \|  __| |  __|   | | | . ` | | |_ |   \ \/  \/ /   | |    | |  |  __  |
- ____) | |____| |____ _| |_| |\  | |__| |    \  /\  /   _| |_   | |  | |  | |
-|_____/|______|______|_____|_| \_|\_____|     \/  \/   |_____|  |_|  |_|  |_|
-
-  _____  ____  _    _ _   _ _____
- / ____|/ __ \| |  | | \ | |  __ \
-| (___ | |  | | |  | |  \| | |  | |
- \___ \| |  | | |  | | . ` | |  | |
- ____) | |__| | |__| | |\  | |__| |
-|_____/ \____/ \____/|_| \_|_____/
-
-             --- VISUAL-TO-AUDITORY AID SYSTEM ---
+libgl1
+libglib2.0-bin
 ```
 
-**SEEING WITH SOUND** is a state-of-the-art navigation assistant designed to empower visually impaired individuals. By converting real-time environmental data into intuitive spatial audio cues, the system helps users avoid obstacles and navigate their surroundings with confidence.
+---
+
+## 🗺️ Navigation Logic
+
+VisionAid uses a priority-based announcement system:
+*   **Urgent Warnings**: "Stop! Object Ahead" triggered for critical proximity.
+*   **Spatial Context**: "Person on your left", "Car moving right".
+*   **Safety Debounce**: Intelligent 800ms-1500ms debouncing to prevent audio fatigue while maintaining safety.
+*   **Clear Path**: Frequent "Path appears clear" heartbeats to provide user confidence during movement.
 
 ---
 
-## 🚀 Versions
-
-### 🌐 1. Web & Mobile Edition (Portable)
-
-Designed for smartphones and laptops. Access it through any modern browser to transform your phone into a wearable navigator.
-
-- **Turbo Audio:** Uses Web Speech API for near-zero voice latency.
-- **Smart Minimalist UI:** Zero-clutter, high-contrast mobile interface.
-- **Responsive:** Adapts perfectly to portrait or landscape mobile screens.
-
-### 🍓 2. Raspberry Pi 5 Edition (Hardware)
-
-A standalone, high-performance offline version optimized for the Raspberry Pi 5 hardware.
-
-- **OpenVINO Acceleration:** Leveraging the AI capabilities of the RPi 5 for near real-time object detection (~10-15 FPS).
-- **Picamera2 Integration:** Native support for the modern `libcamera` stack.
-- **Spatial Audio Guidance:** Directional cues provided via `espeak-ng`.
-- **Zero Internet Requirement:** Fully functional offline for maximum privacy and reliability.
-
----
-
-## 🛠️ Key Features
-
-- **Spatial Mapping:** Categorizes surroundings into **Left, Center,** and **Right** zones.
-- **Collision Avoidance:** Detects objects in the "Center" zone and calculates the safest clearing path.
-- **Proximity Alerts:** Issues high-priority **"STOP"** commands for critically close obstructions (Occupying >40% of the frame).
-- **Priority Object Detection:** YOLOv8-based detection prioritizing people, vehicles, and common household obstacles.
-- **Visual Feedback:** Color-coded bounding boxes for sighted caregivers or developers (optional).
-
----
-
-## 📂 Installation & Setup
-
-### For Web/Mobile Version
-
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/Abinanthan-CG/streamlit-auto-ocr-live.git
-   cd streamlit-auto-ocr-live
-   ```
-2. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. **Run the app:**
-   ```bash
-   python -m streamlit run app.py
-   ```
-
----
-
-## 🍓 Detailed Raspberry Pi 5 Guide
-
-This section provides a step-by-step guide to setting up the standalone hardware version of **SEEING WITH SOUND**.
-
-### 1. Hardware Requirements
-
-- **Raspberry Pi 5** (4GB or 8GB RAM recommended).
-- **Raspberry Pi Camera Module 3** (or compatible libcamera-supported camera).
-- **Audio Output:** Standard 3.5mm jack, USB speakers, or Bluetooth headset.
-- **Power Supply:** Official 27W USB-C PSU to ensure full performance during AI inference.
-
-### 2. Operating System Setup
-
-1. Use **Raspberry Pi Imager** to flash **Raspberry Pi OS (64-bit)** onto a high-speed SD card.
-2. Boot up and complete the initial setup.
-3. **Enable Camera:**
-   - Open a terminal and run `sudo raspi-config`.
-   - Navigate to **Interface Options** > **Camera** and ensure it is enabled.
-   - _Note: RPi 5 uses the modern libcamera stack; legacy camera support must be disabled._
-4. **Update System:**
-   ```bash
-   sudo apt update && sudo apt upgrade -y
-   ```
-
-### 3. Installation
-
-1. **Clone the Project:**
-   ```bash
-   git clone https://github.com/Abinanthan-CG/streamlit-auto-ocr-live.git
-   cd streamlit-auto-ocr-live
-   ```
-2. **Run Automated Setup:**
-   This script installs `libcamera-apps`, `espeak-ng`, and Python dependencies (`picamera2`, `ultralytics`, `openvino`).
-   ```bash
-   chmod +x pi_setup.sh
-   ./pi_setup.sh
-   ```
-   _The script will also automatically export the YOLOv8n model to OpenVINO format for hardware acceleration._
-
-### 4. Running the Navigator
-
-Run the main script to start the visual-to-auditory system:
-
-```bash
-python3 pi_navigator.py
-```
-
-**Customization Flags:**
-
-- `--freq [seconds]`: Adjust how often the system speaks (default: 1.0s).
-- `--display`: Launches a window showing the camera stream and detection boxes (requires a monitor/VNC).
-- `--pc-test`: Use this to run on a PC/Laptop webcam for testing without a Pi.
-
-### 5. Performance Optimization
-
-The system is designed to use **OpenVINO** for inference. On the first run, ensure the `yolov8n_openvino_model` folder exists (generated by `pi_setup.sh`). This reduces CPU load and increases the frame rate significantly compared to standard PyTorch inference.
-
-## 🧠 Technical Overview
-
-The system uses the **MobileNetSSD** deep learning model to perform real-time object detection.
-
-**The Navigation Logic:**
-
-- **Center Zone Blocked?** System checks Left and Right zones.
-- **Left Clear?** Commands: "Move slightly left."
-- **Path Clear?** Commands: "Path is clear."
-- **Object too large (Close)?** Commands: "STOP! Object in front."
-
----
-
-## 📦 Requirements
-
-- **Python 3.9+**
-- **OpenCV** (DNN Module)
-- **Streamlit** (for Web Version)
-- **Pyttsx3 / Web Speech API** (depending on version)
+## 🍓 Hardware Editions
+The repository also includes `pi_navigator.py` and `pi_setup.sh`, a dedicated version optimized for **Raspberry Pi 5** hardware, leveraging OpenVINO for on-device edge acceleration.
 
 ---
 
 ## 🤝 Contributing
-
-Contributions are welcome! Whether it's adding better distance estimation or new object classes, feel free to fork and PR.
+Contributions are welcome! If you have ideas for improving the distance estimation algorithms or adding new languages, please open an issue or submit a pull request.
 
 ## 📝 License
-
-Distributed under the MIT License.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
-
-_Developed to assist and empower the visually impaired._
+*Empowering independence through vision-to-auditory transformation.*
