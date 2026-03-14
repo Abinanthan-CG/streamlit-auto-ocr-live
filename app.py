@@ -6,6 +6,7 @@ import streamlit.components.v1 as components
 from streamlit_webrtc import webrtc_streamer, RTCConfiguration, WebRtcMode
 from streamlit_autorefresh import st_autorefresh
 from ultralytics import YOLO
+import torch
 
 # --- HIGH CONTRAST ACCESSIBILITY UI CONFIG ---
 st.set_page_config(page_title="VisionAid", page_icon="👁️", layout="centered")
@@ -58,6 +59,13 @@ st.markdown("""
     .dist-medium { color: #0F9D58 !important; }
     .dist-far { color: #888888 !important; }
     
+    /* Caregiver text */
+    .caregiver-subtitle {
+        color: #888888 !important;
+        font-size: 1rem !important;
+        margin-top: -10px;
+        margin-bottom: 20px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -76,6 +84,7 @@ LANGUAGES = {
         "clear": "Path appears clear",
         "dark": "Environment too dark",
         "started": "VisionAid navigation started",
+        "obstacle": "Obstacle ahead",
     },
     "Tamil": {
         "code": "ta-IN",
@@ -89,6 +98,7 @@ LANGUAGES = {
         "clear": "பாதை தெளிவாக உள்ளது",
         "dark": "சூழல் மிகவும் இருட்டாக உள்ளது",
         "started": "விஷன்எய்ட் தொடங்கியது",
+        "obstacle": "தடை முன்னால்",
     },
     "Hindi": {
         "code": "hi-IN",
@@ -102,6 +112,50 @@ LANGUAGES = {
         "clear": "रास्ता साफ है",
         "dark": "वातावरण बहुत अंधेरा है",
         "started": "VisionAid शुरू हो गया",
+        "obstacle": "बाधा आगे",
+    }
+}
+
+OBJECT_TRANSLATIONS = {
+    "Tamil": {
+        "person": "நபர்", "car": "கார்", "truck": "லாரி",
+        "bus": "பேருந்து", "motorcycle": "மோட்டார் சைக்கிள்",
+        "bicycle": "சைக்கிள்", "chair": "நாற்காலி",
+        "dining table": "மேசை", "bottle": "பாட்டில்",
+        "dog": "நாய்", "cat": "பூனை", "door": "கதவு",
+        "bed": "படுக்கை", "toilet": "கழிவறை",
+        "tv": "தொலைக்காட்சி", "laptop": "மடிக்கணினி",
+        "cell phone": "கைப்பேசி", "book": "புத்தகம்",
+        "clock": "கடிகாரம்", "cup": "கோப்பை",
+        "traffic light": "போக்குவரத்து விளக்கு",
+        "fire hydrant": "தீயணைப்பு குழாய்",
+        "stop sign": "நிறுத்த அடையாளம்",
+        "bench": "இருக்கை", "backpack": "பை",
+        "umbrella": "குடை", "handbag": "கைப்பை",
+        "suitcase": "பெட்டி", "sports ball": "பந்து",
+        "couch": "சோபா", "potted plant": "தாவரம்",
+        "sink": "கழுவுதொட்டி", "refrigerator": "குளிர்சாதனப்பெட்டி",
+        "scissors": "கத்தரிக்கோல்", "vase": "பூச்சட்டி",
+    },
+    "Hindi": {
+        "person": "व्यक्ति", "car": "कार", "truck": "ट्रक",
+        "bus": "बस", "motorcycle": "मोटरसाइकिल",
+        "bicycle": "साइकिल", "chair": "कुर्सी",
+        "dining table": "मेज़", "bottle": "बोतल",
+        "dog": "कुत्ता", "cat": "बिल्ली", "door": "दरवाज़ा",
+        "bed": "बिस्तर", "toilet": "शौचालय",
+        "tv": "टीवी", "laptop": "लैपटॉप",
+        "cell phone": "मोबाइल फ़ोन", "book": "किताब",
+        "clock": "घड़ी", "cup": "कप",
+        "traffic light": "ट्रैफ़िक लाइट",
+        "fire hydrant": "अग्निशमन यंत्र",
+        "stop sign": "रुकने का संकेत",
+        "bench": "बेंच", "backpack": "बैग",
+        "umbrella": "छाता", "handbag": "पर्स",
+        "suitcase": "सूटकेस", "sports ball": "गेंद",
+        "couch": "सोफ़ा", "potted plant": "पौधा",
+        "sink": "नल", "refrigerator": "फ्रिज",
+        "scissors": "कैंची", "vase": "फूलदान",
     }
 }
 
@@ -117,28 +171,105 @@ if "ui_msg" not in st.session_state: st.session_state.ui_msg = "START NAVIGATION
 if "ui_msg_class" not in st.session_state: st.session_state.ui_msg_class = "status-clear"
 if "snapshot" not in st.session_state: st.session_state.snapshot = None
 
+# Custom Pattern Component
+if "vib_pattern" not in st.session_state: st.session_state.vib_pattern = "[150]"
+
+# --- INJECT HAPTIC ARM BUTTON & POLLING LOOP ---
+components.html(f"""
+    <div id="haptic-container" style="text-align: center; margin-bottom: 10px;">
+        <button id="arm-btn" style="
+            background-color: #DB4437; color: white; border: none; 
+            padding: 15px 30px; font-size: 1.2rem; font-weight: bold; 
+            border-radius: 8px; cursor: pointer; width: 100%; max-width: 400px;
+            font-family: 'Inter', sans-serif;">
+            TAP TO ENABLE HAPTICS
+        </button>
+        <div id="armed-indicator" style="
+            display: none; color: #0F9D58; font-size: 1.2rem; 
+            font-weight: bold; font-family: 'Inter', sans-serif;
+            padding: 10px;">
+            📳 Haptics ON
+        </div>
+    </div>
+    
+    <script>
+    // Global state
+    window.hapticsArmed = false;
+    window.currentVibrationPattern = [0];
+    window.lastVibrationPattern = [0];
+    window.lastVibrationTime = 0;
+    
+    document.getElementById('arm-btn').addEventListener('click', function() {{
+        window.hapticsArmed = true;
+        this.style.display = 'none';
+        document.getElementById('armed-indicator').style.display = 'block';
+        
+        // Initial tiny vibrate to confirm
+        if(navigator.vibrate) navigator.vibrate(50);
+    }});
+    
+    // Polling Loop
+    setInterval(function() {{
+        if(!window.hapticsArmed || !navigator.vibrate) return;
+        
+        // Check if pattern changed and it's been at least 2000ms since last vibrate (debounce)
+        let now = Date.now();
+        if (JSON.stringify(window.currentVibrationPattern) !== JSON.stringify(window.lastVibrationPattern) || (now - window.lastVibrationTime) > 2000) {{
+             if (window.currentVibrationPattern.length > 0 && window.currentVibrationPattern[0] !== 0) {{
+                 navigator.vibrate(window.currentVibrationPattern);
+                 window.lastVibrationPattern = [...window.currentVibrationPattern];
+                 window.lastVibrationTime = now;
+             }}
+        }}
+    }}, 300);
+    </script>
+""", height=100)
+
 # Sidebar Config
 st.sidebar.title("Accessibility Settings")
 selected_lang_name = st.sidebar.selectbox("Language / மொழி / भाषा", options=list(LANGUAGES.keys()))
 lang_cfg = LANGUAGES[selected_lang_name]
 
 # Stats
+st.sidebar.markdown("### About This View")
+st.sidebar.markdown("""
+<div style="color: #bbb; font-size: 0.95rem;">
+This screen is for caregivers, demo observers, and developers.<br>
+The visually impaired user receives all feedback via voice and haptics only.<br>
+No screen interaction is needed during navigation.
+</div>
+""", unsafe_allow_html=True)
+st.sidebar.markdown("---")
 st.sidebar.markdown(f"**Frames Processed:** {st.session_state.frame_count}")
 st.sidebar.markdown(f"**Objects Detected:** {st.session_state.det_count}")
 
-# --- ML MODEL ---
-@st.cache_resource
+# --- ML MODELS ---
+@st.cache_resource(show_spinner="Loading YOLOv8s model...")
 def load_yolo():
-    return YOLO("yolov8n.pt")
+    return YOLO("yolov8s.pt")
+
+@st.cache_resource(show_spinner="Loading MiDaS depth model...")
+def load_midas():
+    model = torch.hub.load("intel-isl/MiDaS", "MiDaS_small")
+    model.eval()
+    transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
+    transform = transforms.small_transform
+    return model, transform
 
 try:
     MODEL = load_yolo()
+    MIDAS_MODEL, MIDAS_TRANSFORM = load_midas()
 except Exception as e:
-    st.error(f"Error loading YOLO model: {e}")
+    st.error(f"Error loading models: {e}")
     st.stop()
     
 # --- HELPER FUNCTIONS ---
-def speak_and_vibrate(text, dist_level="FAR"):
+def translate_label(label, language):
+    if language == "English":
+        return label
+    return OBJECT_TRANSLATIONS.get(language, {}).get(label, label)
+
+def trigger_voice_and_haptic(text, dist_level="FAR"):
     # Debounce check
     now = time.time() * 1000
     if text == st.session_state.last_spoken and (now - st.session_state.last_speak_time) < 2000:
@@ -147,18 +278,18 @@ def speak_and_vibrate(text, dist_level="FAR"):
     st.session_state.last_spoken = text
     st.session_state.last_speak_time = now
     
-    # Haptic Pattern
-    vib_pattern = "[150]"
-    if dist_level == "VERY_CLOSE": vib_pattern = "[100, 50, 100, 50, 100]"
-    elif dist_level == "CLOSE": vib_pattern = "[200, 100, 200]"
-    elif dist_level == "MEDIUM": vib_pattern = "[300]"
+    # Haptic Pattern for JS
+    vib_pattern_arr = "[150]"
+    if dist_level == "VERY_CLOSE": vib_pattern_arr = "[100, 50, 100, 50, 100]"
+    elif dist_level == "CLOSE": vib_pattern_arr = "[200, 100, 200]"
+    elif dist_level == "MEDIUM": vib_pattern_arr = "[300]"
     
-    # Inject JS
+    # Inject voice and update haptic pattern
     components.html(f"""
         <script>
-        // Haptic Feedback
-        if (navigator.vibrate) {{
-            navigator.vibrate({vib_pattern});
+        // Update global window pattern for polling mechanism
+        if (window.parent.window.currentVibrationPattern !== undefined) {{
+            window.parent.window.currentVibrationPattern = {vib_pattern_arr};
         }}
         
         // Voice Feedback
@@ -169,6 +300,44 @@ def speak_and_vibrate(text, dist_level="FAR"):
         window.speechSynthesis.speak(msg);
         </script>
     """, height=0)
+
+
+def estimate_depth_obstacle(frame_bgr, midas_model, midas_transform):
+    """
+    Returns: "VERY_CLOSE" | "CLOSE" | "MEDIUM" | "CLEAR"
+    based on the minimum depth value in the CENTER zone of the frame.
+    Center zone = middle 40% width, middle 60% height.
+    """
+    h, w = frame_bgr.shape[:2]
+    frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    input_batch = midas_transform(frame_rgb)
+
+    with torch.no_grad():
+        depth = midas_model(input_batch)
+        depth = torch.nn.functional.interpolate(
+            depth.unsqueeze(1), size=(h, w),
+            mode="bicubic", align_corners=False
+        ).squeeze()
+
+    depth_np = depth.numpy()
+
+    # Center zone only — ignore edges
+    cx1 = int(w * 0.30)
+    cx2 = int(w * 0.70)
+    cy1 = int(h * 0.20)
+    cy2 = int(h * 0.80)
+    center_depth = depth_np[cy1:cy2, cx1:cx2]
+
+    # MiDaS outputs INVERSE depth — higher value = closer object
+    max_depth = float(center_depth.max())
+    depth_range = float(depth_np.max() - depth_np.min()) + 1e-6
+    normalized = max_depth / depth_range  # 0.0 to 1.0
+
+    if normalized > 0.85:   return "VERY_CLOSE"
+    elif normalized > 0.70: return "CLOSE"
+    elif normalized > 0.55: return "MEDIUM"
+    else:                   return "CLEAR"
+
 
 def letterbox(image_bgr, target_size=640):
     h, w = image_bgr.shape[:2]
@@ -198,12 +367,6 @@ def classify_direction(bbox_center_x, frame_width):
     elif ratio > 0.65: return "RIGHT"
     else:              return "CENTER"
 
-def get_dist_color_hex(dist_lvl):
-    if dist_lvl == "VERY_CLOSE": return "#DB4437"
-    if dist_lvl == "CLOSE": return "#F4B400"
-    if dist_lvl == "MEDIUM": return "#0F9D58"
-    return "#888888"
-
 def get_dist_class(dist_lvl):
     if dist_lvl == "VERY_CLOSE": return "dist-very-close"
     if dist_lvl == "CLOSE": return "dist-close"
@@ -227,6 +390,7 @@ class VideoProcessor:
 
 # --- MAIN UI ---
 st.markdown("<h1>VisionAid</h1>", unsafe_allow_html=True)
+st.markdown("<p class='caregiver-subtitle'>👁 CAREGIVER VIEW — Live Detection Monitor</p>", unsafe_allow_html=True)
 
 webrtc_ctx = webrtc_streamer(
     key="visionaid",
@@ -251,18 +415,23 @@ if webrtc_ctx.state.playing:
         now_sec = time.time()
         if avg_brightness < 30:
             if now_sec - st.session_state.last_dark_warn > 5:
-                speak_and_vibrate(lang_cfg["dark"], "FAR")
+                trigger_voice_and_haptic(lang_cfg["dark"], "FAR")
                 st.session_state.last_dark_warn = now_sec
             st.session_state.ui_msg = lang_cfg["dark"]
             st.session_state.ui_msg_class = "dist-very-close"
             st.session_state.snapshot = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
             st.rerun()
             
-        # Inference with Letterbox
+        # Inference with Letterbox (YOLOv8s)
         lb_img, scale, pad_x, pad_y = letterbox(frame_bgr)
         results = MODEL(lb_img, verbose=False, conf=0.70)[0]
         
+        # Inference MiDaS
+        midas_dist = estimate_depth_obstacle(frame_bgr, MIDAS_MODEL, MIDAS_TRANSFORM)
+        
         detections = []
+        yolo_active_dists = set()
+        
         for box in results.boxes:
             conf = float(box.conf[0])
             if conf < 0.70: continue
@@ -276,7 +445,8 @@ if webrtc_ctx.state.playing:
             ux2, uy2 = min(orig_w, ux2), min(orig_h, uy2)
             
             cls_id = int(box.cls[0])
-            label = MODEL.names[cls_id]
+            label_en = MODEL.names[cls_id]
+            label_trans = translate_label(label_en, selected_lang_name)
             
             bbox_h = uy2 - uy1
             bbox_cx = (ux1 + ux2) / 2
@@ -284,12 +454,14 @@ if webrtc_ctx.state.playing:
             dist = estimate_distance(bbox_h, orig_h)
             direction = classify_direction(bbox_cx, orig_w)
             
+            yolo_active_dists.add(dist)
+            
             # Distance rank for sorting (lower is closer)
             dist_rank = 0 if dist == "VERY_CLOSE" else (1 if dist == "CLOSE" else (2 if dist == "MEDIUM" else 3))
-            is_prio = 0 if label in PRIORITY_OBJECTS else 1
+            is_prio = 0 if label_en in PRIORITY_OBJECTS else 1
             
             detections.append({
-                "label": label,
+                "label": label_trans,
                 "dist": dist,
                 "dir": direction,
                 "conf": conf,
@@ -300,6 +472,8 @@ if webrtc_ctx.state.playing:
         st.session_state.det_count += len(detections)
             
         # UI & Voice Logic
+        st.session_state.ui_msg = ""
+        
         if len(detections) > 0:
             st.session_state.empty_frames = 0
             
@@ -323,26 +497,42 @@ if webrtc_ctx.state.playing:
                 dist_str = lang_cfg["very_close"] if pdist == "VERY_CLOSE" else (lang_cfg["close"] if pdist == "CLOSE" else (lang_cfg["nearby"] if pdist == "MEDIUM" else ""))
                 announce = f"{plabel} {dir_str}, {dist_str}".strip(", ")
                 
-            speak_and_vibrate(announce, pdist)
+            trigger_voice_and_haptic(announce, pdist)
             
             icon = get_dir_icon(pdir)
             st.session_state.ui_msg = f"{icon} {plabel.upper()} {pdist}"
             st.session_state.ui_msg_class = get_dist_class(pdist)
             
+        elif midas_dist in ["VERY_CLOSE", "CLOSE"] and midas_dist not in yolo_active_dists:
+            # MiDaS Depth trigger since YOLO is empty
+            st.session_state.empty_frames = 0
+            dist_str = lang_cfg["very_close"] if midas_dist == "VERY_CLOSE" else lang_cfg["close"]
+            announce = f"{lang_cfg['warning']}! {lang_cfg['obstacle']}, {dist_str}"
+            
+            trigger_voice_and_haptic(announce, midas_dist)
+            
+            st.session_state.ui_msg = f"▲ {lang_cfg['obstacle'].upper()} {midas_dist}"
+            st.session_state.ui_msg_class = get_dist_class(midas_dist)
+            
         else:
             st.session_state.empty_frames += 1
             if st.session_state.empty_frames == 3:
-                speak_and_vibrate(lang_cfg["clear"], "FAR")
+                trigger_voice_and_haptic(lang_cfg["clear"], "FAR")
                 st.session_state.ui_msg = lang_cfg["clear"]
                 st.session_state.ui_msg_class = "status-clear"
                 
             if st.session_state.empty_frames > 3:
                  st.session_state.ui_msg = lang_cfg["clear"]
                  st.session_state.ui_msg_class = "status-clear"
+                 
+        # Always append caregiver badge if detecting
+        if st.session_state.ui_msg and st.session_state.ui_msg != lang_cfg["clear"]:
+            st.session_state.ui_msg += "<br><span style='font-size: 0.9rem; color: #888888;'>🔊 Announced to user via voice</span>"
             
         # Show snapshot
         st.session_state.snapshot = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 
+st.markdown("<h3 style='margin-bottom:0;'>Live Detection Feed — Caregiver View</h3>", unsafe_allow_html=True)
 # Display Frame
 if st.session_state.snapshot is not None:
     st.image(st.session_state.snapshot, use_container_width=True)
